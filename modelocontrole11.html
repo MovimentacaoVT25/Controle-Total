@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html class="dark" lang="pt-BR">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Stock OS - Industrial</title>
+    
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: { "primary": "#00c3ff", "background-dark": "#0a0a0f", "surface-dark": "#16161e", "status-green": "#00ff99", "status-red": "#ff3366", "status-yellow": "#ffd700" },
+                    fontFamily: { "display": ["Space Grotesk", "sans-serif"] },
+                },
+            },
+        }
+    </script>
+    <style>
+        .glow-green { box-shadow: 0 0 10px rgba(0, 255, 153, 0.2); }
+        .glow-red { box-shadow: 0 0 15px rgba(255, 51, 102, 0.25); }
+        .glass-panel { backdrop-filter: blur(12px); background: rgba(22, 22, 30, 0.9); border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .modal-enter { opacity: 0; transform: scale(0.95); }
+        .modal-enter-active { opacity: 1; transform: scale(1); transition: all 0.2s ease-out; }
+    </style>
+</head>
+
+<body class="bg-[#0f1115] font-display text-slate-100 min-h-screen flex flex-col" onclick="closeMenus(event)">
+
+    <header class="sticky top-0 z-30 glass-panel w-full shadow-lg shadow-black/40 border-b border-white/5">
+        <div class="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between gap-4">
+            <div class="flex items-center gap-6 overflow-hidden w-full">
+                <div class="flex flex-col flex-shrink-0 min-w-[120px]">
+                    <h1 class="text-lg font-bold leading-none tracking-tight">Stock OS</h1>
+                    <span id="current-sector-label" class="text-[10px] uppercase tracking-[0.2em] text-primary font-bold mt-0.5 truncate">Carregando...</span>
+                </div>
+                <div class="h-8 w-px bg-white/10 hidden sm:block flex-shrink-0"></div>
+                <nav id="tabs-container" class="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full pr-4"></nav>
+            </div>
+            
+            <div class="flex items-center gap-2 flex-shrink-0 border-l border-white/10 pl-4">
+                
+                <button id="export-btn" onclick="exportToXLS()" class="hidden px-3 py-2 bg-status-green/10 hover:bg-status-green/20 border border-status-green/20 rounded-lg text-status-green text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm">download</span> Baixar XLS
+                </button>
+
+                <div class="relative">
+                    <button id="filter-btn" onclick="toggleFilterMenu(event)" class="size-9 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 transition-colors text-slate-300 hover:text-white border border-white/5" title="Filtrar">
+                        <span class="material-symbols-outlined text-[20px]">filter_list</span>
+                        <span id="filter-indicator" class="absolute top-1 right-1 size-2 bg-primary rounded-full hidden"></span>
+                    </button>
+                    <div id="filter-menu" class="hidden absolute right-0 mt-2 w-56 bg-[#16161e] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
+                        <div class="p-2 flex flex-col gap-1">
+                            <span class="text-[10px] uppercase tracking-widest text-slate-500 px-3 py-2">Ordenação</span>
+                            <button onclick="applySort('default')" class="filter-item text-left w-full px-3 py-2 rounded hover:bg-white/5 text-sm">Padrão</button>
+                            <button onclick="applySort('asc')" class="filter-item text-left w-full px-3 py-2 rounded hover:bg-white/5 text-sm text-status-red">Zerados Primeiro</button>
+                            <button onclick="applySort('desc')" class="filter-item text-left w-full px-3 py-2 rounded hover:bg-white/5 text-sm text-status-green">Maior Saldo</button>
+                        </div>
+                    </div>
+                </div>
+
+                <button onclick="fetchData(currentTab, true)" class="size-9 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-primary border border-white/5" title="Atualizar">
+                    <span class="material-symbols-outlined text-[20px]">sync</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 p-6 pb-32 max-w-[1600px] mx-auto w-full space-y-8">
+        
+        <div class="flex items-end justify-between border-b border-white/5 pb-4 px-2">
+            <div>
+                <div class="flex items-center gap-2 mb-1" id="connection-status">
+                    <span class="size-2 rounded-full bg-slate-500"></span>
+                    <span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Conectando...</span>
+                </div>
+                <h3 id="page-title" class="text-2xl font-bold tracking-tight text-white">Visão Geral</h3>
+            </div>
+            <div class="text-right">
+                <span id="total-count" class="text-3xl font-bold text-white block leading-none transition-all duration-300">-</span>
+                <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Itens Listados</span>
+            </div>
+        </div>
+
+        <div id="loading" class="flex flex-col items-center justify-center py-20">
+            <div class="size-8 border-2 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
+            <p class="text-xs uppercase tracking-widest text-slate-500">Inicializando Sistema...</p>
+        </div>
+
+        <div id="error-msg" class="hidden p-6 rounded-xl bg-red-500/10 border border-red-500/20 text-center mx-auto max-w-lg">
+            <p class="text-status-red font-bold">Falha na Conexão</p>
+        </div>
+
+        <div id="dynamic-content" class="flex flex-col gap-12 hidden"></div>
+    </main>
+
+    <div id="details-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onclick="closeModal()"></div>
+        <div class="relative w-full max-w-2xl bg-[#16161e] border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] modal-enter" id="modal-window">
+            <div class="p-5 border-b border-white/5 flex justify-between items-center bg-white/5">
+                <h3 class="text-xl font-bold text-white" id="modal-title">Detalhes</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white"><span class="material-symbols-outlined">close</span></button>
+            </div>
+            <div class="p-0 overflow-y-auto custom-scrollbar flex-1 min-h-[200px]" id="modal-body"></div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // ⚙️ CONFIGURAÇÃO 
+        // ==========================================
+        const SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbxxVFRDZGLNahToyaR85VEsqvUYngie3Tqy4LCGeY_PV2-ZTbvytTTDFeSq8gO3NvF_/exec'; 
+
+        const FAMILIES_CONFIG = [
+            { code: '20.006', title: 'Família 20.006' },
+            { code: '89.004', title: 'Família 89.004' },
+            { code: '89.005', title: 'Família 89.005' },
+            { code: '20.003', title: 'Junta 20.003' },
+            { code: '10.004', title: 'Família 10.004' },
+        ];
+
+        const SECTORS = [
+            "Alertas", // Nova aba especial no início
+            "Injeção Plástico", "Injeção Alumínio", "Torno", "Fresa", 
+            "Montagem Manual", "Montagem Automática", "Manutenção", "Logística"
+        ];
+        
+        let currentTab = SECTORS[1]; // Começa na Injeção (Index 1), não nos alertas
+        let currentSort = 'default'; 
+        let cachedData = []; 
+        let isFirstLoad = true; 
+
+        // Elementos DOM
+        const tabsContainer = document.getElementById('tabs-container');
+        const container = document.getElementById('dynamic-content');
+        const loading = document.getElementById('loading');
+        const errorDiv = document.getElementById('error-msg');
+        const totalCount = document.getElementById('total-count');
+        const connStatus = document.getElementById('connection-status');
+        const pageTitle = document.getElementById('page-title');
+        const sectorLabel = document.getElementById('current-sector-label');
+        const filterMenu = document.getElementById('filter-menu');
+        const filterIndicator = document.getElementById('filter-indicator');
+        const exportBtn = document.getElementById('export-btn'); // Botão Exportar
+
+        // Modal
+        const modal = document.getElementById('details-modal');
+        const modalWindow = document.getElementById('modal-window');
+        const modalBody = document.getElementById('modal-body');
+        const modalTitle = document.getElementById('modal-title');
+
+        // ============================
+        // FILTRO E EXPORTAÇÃO
+        // ============================
+        function toggleFilterMenu(e) { e.stopPropagation(); filterMenu.classList.toggle('hidden'); }
+        function closeMenus(e) { if (!filterMenu.contains(e.target) && e.target.id !== 'filter-btn') filterMenu.classList.add('hidden'); }
+
+        function applySort(type) {
+            currentSort = type;
+            filterIndicator.classList.toggle('hidden', type === 'default');
+            filterMenu.classList.add('hidden');
+            container.innerHTML = ''; 
+            processAndRender(cachedData);
+        }
+
+        function sortItems(items) {
+            if (currentSort === 'default') return items; 
+            let sorted = [...items];
+            return sorted.sort((a, b) => {
+                const qtdA = Number(a.qtd) || 0; const qtdB = Number(b.qtd) || 0;
+                return currentSort === 'asc' ? qtdA - qtdB : qtdB - qtdA;
+            });
+        }
+
+        // --- FUNÇÃO DE EXPORTAR XLS (CSV) ---
+        function exportToXLS() {
+            if (!cachedData || cachedData.length === 0) {
+                alert("Sem dados para exportar.");
+                return;
+            }
+
+            // Cabeçalho do CSV
+            let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // BOM para acentos funcionarem no Excel
+            csvContent += "Setor;SKU;Nome;Quantidade;Unidade;Estoque Minimo;Status\n";
+
+            // Dados
+            cachedData.forEach(item => {
+                let setor = item.setor || currentTab; // Se vier da busca de Alertas tem setor, senão usa a aba atual
+                let linha = [
+                    setor,
+                    item.sku,
+                    `"${item.nome}"`, // Aspas para proteger descrições com vírgula
+                    String(item.qtd).replace('.', ','), // Formato BR
+                    item.unidade,
+                    item.minimo || 0,
+                    item.status
+                ].join(";"); // Ponto e vírgula é melhor para Excel BR
+                csvContent += linha + "\n";
+            });
+
+            // Download
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            
+            // Data e Hora no nome do arquivo
+            const now = new Date();
+            const timeStr = `${now.getDate()}-${now.getMonth()+1}_${now.getHours()}h${now.getMinutes()}`;
+            link.setAttribute("download", `Relatorio_Estoque_${timeStr}.csv`);
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // ============================
+        // LÓGICA PRINCIPAL
+        // ============================
+        function renderTabs() {
+            tabsContainer.innerHTML = '';
+            SECTORS.forEach(sector => {
+                const btn = document.createElement('button');
+                const isActive = sector === currentTab;
+                
+                // Estilo Especial para Aba Alertas
+                const isAlertTab = sector === "Alertas";
+                let baseClass = isActive 
+                    ? 'relative px-4 py-2 text-sm font-bold bg-primary/10 rounded-lg border border-primary/20 whitespace-nowrap transition-all shadow-[0_0_15px_rgba(0,195,255,0.15)] text-primary'
+                    : 'relative px-4 py-2 text-sm font-medium text-slate-500 hover:text-white whitespace-nowrap transition-colors rounded-lg hover:bg-white/5 border border-transparent';
+                
+                if (isAlertTab) {
+                    baseClass = isActive 
+                        ? 'relative px-4 py-2 text-sm font-bold bg-status-red/20 rounded-lg border border-status-red/40 whitespace-nowrap transition-all shadow-[0_0_15px_rgba(255,51,102,0.2)] text-status-red'
+                        : 'relative px-4 py-2 text-sm font-medium text-status-red hover:text-white whitespace-nowrap transition-colors rounded-lg hover:bg-white/5 border border-transparent flex items-center gap-2';
+                }
+
+                btn.className = baseClass;
+                btn.innerHTML = isAlertTab && !isActive ? '<span class="material-symbols-outlined text-sm">warning</span> Alertas' : sector;
+                
+                btn.onclick = () => { 
+                    currentTab = sector; 
+                    isFirstLoad = true; 
+                    container.innerHTML = ''; 
+                    renderTabs(); 
+                    fetchData(sector, true); 
+                };
+                tabsContainer.appendChild(btn);
+            });
+        }
+
+        async function fetchData(tabName = currentTab, forceLoading = false) {
+            // Controle do Botão Exportar
+            if (tabName === "Alertas") exportBtn.classList.remove('hidden');
+            else exportBtn.classList.add('hidden');
+
+            if (forceLoading || isFirstLoad) {
+                loading.classList.remove('hidden');
+                container.classList.add('hidden');
+                errorDiv.classList.add('hidden');
+            }
+            
+            pageTitle.innerText = tabName === "Alertas" ? "Itens Críticos & Zerados" : tabName;
+            sectorLabel.innerText = tabName;
+            connStatus.innerHTML = '<span class="size-2 rounded-full bg-yellow-500 animate-pulse"></span><span class="text-[10px] font-bold uppercase tracking-widest text-yellow-500">Sincronizando...</span>';
+
+            try {
+                const url = `${SHEET_API_URL}?tab=${encodeURIComponent(tabName)}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data.error) throw new Error(data.message);
+                
+                cachedData = data;
+                processAndRender(data);
+                totalCount.innerText = data.length;
+                connStatus.innerHTML = '<span class="size-2 rounded-full bg-status-green shadow-[0_0_8px_#00ff99]"></span><span class="text-[10px] font-bold uppercase tracking-widest text-status-green">Online</span>';
+                isFirstLoad = false; 
+            } catch (error) {
+                console.error(error);
+                if (isFirstLoad) { loading.classList.add('hidden'); errorDiv.classList.remove('hidden'); }
+                connStatus.innerHTML = '<span class="size-2 rounded-full bg-status-red"></span><span class="text-[10px] font-bold uppercase tracking-widest text-status-red">Offline</span>';
+            }
+        }
+
+        function processAndRender(items) {
+            loading.classList.add('hidden');
+            container.classList.remove('hidden');
+
+            if (items.length === 0) {
+                container.innerHTML = '<div class="flex flex-col items-center justify-center py-20 text-slate-500 gap-4"><span class="material-symbols-outlined text-4xl">check_circle</span><p>Tudo certo! Nenhum item crítico encontrado.</p></div>';
+                return;
+            }
+
+            let groupedItems = {};
+            FAMILIES_CONFIG.forEach(fam => groupedItems[fam.code] = []);
+            groupedItems['OUTROS'] = [];
+
+            items.forEach(item => {
+                const sku = String(item.sku).trim();
+                let found = false;
+                for (let fam of FAMILIES_CONFIG) {
+                    if (sku.startsWith(fam.code)) { groupedItems[fam.code].push(item); found = true; break; }
+                }
+                if (!found) groupedItems['OUTROS'].push(item);
+            });
+
+            FAMILIES_CONFIG.forEach(fam => {
+                if (groupedItems[fam.code].length > 0) updateOrRenderSection(fam.code, fam.title, sortItems(groupedItems[fam.code]));
+            });
+            if (groupedItems['OUTROS'].length > 0) updateOrRenderSection('OUTROS', 'Outros Itens / Geral', sortItems(groupedItems['OUTROS']));
+        }
+
+        function updateOrRenderSection(sectionId, title, items) {
+            let section = document.getElementById(`sec-${sectionId}`);
+            let cardContainer;
+            if (!section) {
+                section = document.createElement('section');
+                section.id = `sec-${sectionId}`;
+                section.innerHTML = `
+                    <div class="flex items-center gap-4 mb-6 border-b border-white/5 pb-2">
+                        <div class="px-3 py-1 bg-primary/5 rounded text-primary text-sm font-bold uppercase tracking-widest border border-primary/20 shadow-[0_0_10px_rgba(0,195,255,0.1)]">${title}</div>
+                        <div class="h-px bg-white/5 flex-1"></div>
+                        <span class="text-slate-600 text-[10px] font-mono font-bold count-badge">${items.length} ITENS</span>
+                    </div>`;
+                cardContainer = document.createElement('div');
+                cardContainer.id = `grid-${sectionId}`;
+                cardContainer.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4";
+                section.appendChild(cardContainer);
+                container.appendChild(section);
+            } else {
+                cardContainer = document.getElementById(`grid-${sectionId}`);
+                section.querySelector('.count-badge').innerText = `${items.length} ITENS`;
+            }
+            items.forEach(item => {
+                let existingCard = document.getElementById(`card-${item.sku}`);
+                if (existingCard) updateCardValues(existingCard, item);
+                else cardContainer.appendChild(createCard(item));
+            });
+        }
+
+        function createCard(item) {
+            const visual = calculateVisuals(item);
+            const el = document.createElement('div');
+            el.id = `card-${item.sku}`; 
+            el.className = `w-full group relative bg-surface-dark border border-white/5 rounded-xl overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:-translate-y-1 ${visual.theme.glow}`;
+            
+            // Adiciona o nome do setor se estivermos na aba Alertas
+            const setorTag = item.setor ? `<div class="absolute top-0 left-0 bg-white/10 px-2 py-0.5 text-[8px] uppercase font-bold text-slate-300 rounded-br-lg z-10">${item.setor}</div>` : '';
+
+            el.innerHTML = `
+                ${setorTag}
+                <div class="p-5 flex flex-col gap-3">
+                    <div class="flex justify-between items-start mt-2">
+                        <div class="overflow-hidden">
+                            <h4 class="text-white text-lg font-bold leading-tight truncate pr-2 w-full" title="${item.nome}">${item.nome || 'Sem Nome'}</h4>
+                            <p class="text-slate-500 text-xs font-mono mt-1 opacity-70 flex items-center gap-1"><span class="material-symbols-outlined text-[10px]">qr_code_2</span> ${item.sku}</p>
+                        </div>
+                        <span class="val-status ${visual.theme.color} text-[10px] font-bold border border-white/10 px-2 py-1 rounded bg-black/40 backdrop-blur-sm flex-shrink-0 transition-colors duration-500">${visual.status}</span>
+                    </div>
+                    <div class="flex items-end justify-between mt-2">
+                        <div class="flex items-baseline gap-1">
+                            <span class="val-qtd text-4xl font-bold text-white tracking-tighter transition-colors duration-300 ${visual.status === 'CRÍTICO' ? 'text-status-red' : ''}">${visual.qtd.toLocaleString('pt-BR')}</span>
+                            <span class="text-xs text-slate-500 font-bold">${item.unidade || 'UN'}</span>
+                        </div>
+                        ${visual.minStock > 0 ? `<div class="text-right border-l border-white/10 pl-3"><p class="text-[9px] text-slate-500 uppercase tracking-wider">Mínimo</p><p class="text-sm font-bold text-slate-300 font-mono">${visual.minStock}</p></div>` : ''}
+                    </div>
+                    <div class="relative w-full bg-black/40 h-2 rounded-full mt-2 overflow-hidden border border-white/5">
+                        <div class="val-bar ${visual.theme.bar} h-full transition-all duration-1000" style="width: ${visual.pct}%"></div>
+                        ${visual.minStock > 0 ? `<div class="absolute top-0 bottom-0 w-0.5 bg-white/80 z-10 shadow-[0_0_5px_white]" style="left: ${visual.minPct}%" title="Ponto de Reposição"></div>` : ''}
+                    </div>
+                    <div class="pt-3 mt-1 border-t border-white/5">
+                        <button onclick="openDetails('${item.sku}')" class="w-full py-2 rounded bg-white/5 hover:bg-white/10 border border-white/5 text-slate-300 hover:text-white text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-colors"><span class="material-symbols-outlined text-sm">inventory_2</span> Verificar Estoque</button>
+                    </div>
+                </div>`;
+            return el;
+        }
+
+        function updateCardValues(card, item) {
+            const visual = calculateVisuals(item);
+            const qtdEl = card.querySelector('.val-qtd');
+            const currentQtd = parseInt(qtdEl.innerText.replace(/\./g, ''));
+            if (currentQtd !== visual.qtd) {
+                qtdEl.innerText = visual.qtd.toLocaleString('pt-BR');
+                qtdEl.classList.add('text-primary'); setTimeout(() => qtdEl.classList.remove('text-primary'), 500);
+            }
+            const statusEl = card.querySelector('.val-status');
+            if (statusEl.innerText !== visual.status) {
+                statusEl.innerText = visual.status;
+                statusEl.className = `val-status ${visual.theme.color} text-[10px] font-bold border border-white/10 px-2 py-1 rounded bg-black/40 backdrop-blur-sm flex-shrink-0 transition-colors duration-500`;
+                card.className = `w-full group relative bg-surface-dark border border-white/5 rounded-xl overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:-translate-y-1 ${visual.theme.glow}`;
+            }
+            const barEl = card.querySelector('.val-bar');
+            barEl.style.width = `${visual.pct}%`;
+            barEl.className = `val-bar ${visual.theme.bar} h-full transition-all duration-1000`;
+        }
+
+        function calculateVisuals(item) {
+            const qtd = Number(item.qtd) || 0;
+            const minStock = Number(item.minimo) || 0; 
+            const cap = Number(item.capacidade) || (minStock > 0 ? minStock * 3 : 1000);
+            let status = "OK";
+            let theme = { color: 'text-status-green', glow: 'glow-green', bar: 'bg-status-green' };
+
+            // Se for aba de Alertas, sempre força o visual crítico
+            if (currentTab === "Alertas" || item.status.includes("CRÍTICO") || item.status.includes("CRITICO")) {
+                status = "CRÍTICO";
+                theme = { color: 'text-status-red', glow: 'glow-red border-status-red/40', bar: 'bg-status-red shadow-[0_0_15px_#ff3366]' };
+            } else if (minStock > 0) {
+                if (qtd <= minStock) {
+                    status = "CRÍTICO"; theme = { color: 'text-status-red', glow: 'glow-red border-status-red/40', bar: 'bg-status-red shadow-[0_0_15px_#ff3366]' };
+                } else if (qtd <= (minStock * 1.2)) {
+                    status = "ATENÇÃO"; theme = { color: 'text-status-yellow', glow: 'border-status-yellow/30', bar: 'bg-status-yellow' };
+                }
+            } else if ((qtd / cap) < 0.2) {
+                status = "BAIXO"; theme = { color: 'text-status-red', glow: 'glow-red', bar: 'bg-status-red' };
+            }
+            
+            let pct = Math.min((qtd / cap) * 100, 100);
+            let minPct = Math.min((minStock / cap) * 100, 100);
+            return { qtd, minStock, status, theme, pct, minPct };
+        }
+
+        async function openDetails(sku) {
+            modal.classList.remove('hidden'); modalWindow.classList.remove('modal-enter-active'); void modalWindow.offsetWidth; modalWindow.classList.add('modal-enter-active');
+            modalTitle.innerText = `SKU: ${sku}`;
+            document.getElementById('modal-body').innerHTML = `<div class="flex flex-col items-center justify-center h-48 gap-3"><span class="size-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></span><span class="text-xs uppercase tracking-widest text-slate-500">Consultando Base...</span></div>`;
+            try {
+                const url = `${SHEET_API_URL}?type=details&sku=${encodeURIComponent(sku)}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data.error) throw new Error(data.message);
+                
+                let html = `<div class="flex flex-col divide-y divide-white/5">`;
+                if(data.length === 0) html = `<div class="flex flex-col items-center justify-center h-48 text-slate-500 gap-2"><span class="material-symbols-outlined text-3xl">search_off</span><p class="text-sm">Nada encontrado no ALM.</p></div>`;
+                else data.forEach(row => {
+                    html += `<div class="p-4 hover:bg-white/[0.02] transition-colors flex justify-between items-center group"><div class="flex flex-col gap-1"><div class="flex items-center gap-2"><span class="text-primary font-bold font-mono text-sm">${row.loc || 'S/ LOC'}</span><span class="text-[10px] text-slate-500 border border-white/10 px-1 rounded">ALM</span></div><span class="text-xs text-slate-400 font-mono">LOTE: <span class="text-slate-200">${row.lote}</span></span></div><div class="text-right"><span class="block text-lg font-bold text-white tracking-tight">${Number(row.qtd).toLocaleString('pt-BR')} <span class="text-xs text-slate-500 font-normal">${row.un}</span></span></div></div>`;
+                });
+                html += `</div>`;
+                document.getElementById('modal-body').innerHTML = html;
+            } catch (error) { console.error(error); }
+        }
+        function closeModal() { modal.classList.add('hidden'); }
+
+        renderTabs();
+        fetchData(currentTab);
+        setInterval(() => fetchData(currentTab), 30000);
+    </script>
+</body>
+</html>
