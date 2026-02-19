@@ -61,6 +61,9 @@
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+        /* Otimização: Reduzir repaints */
+        .will-change-transform { will-change: transform; }
     </style>
 </head>
 
@@ -80,7 +83,6 @@
                         type="text" 
                         id="search-input" 
                         placeholder="Buscar por SKU ou nome..." 
-                        oninput="filterItems(this.value)"
                         class="w-full h-9 pl-10 pr-4 bg-white/5 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary text-white placeholder:text-slate-500"
                     >
                     <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
@@ -236,7 +238,6 @@
                                 min="0"
                                 step="1"
                                 class="flex-1 h-14 px-4 bg-black/30 border-2 border-white/10 rounded-xl text-2xl font-bold text-center focus:outline-none focus:border-primary text-white placeholder:text-slate-500"
-                                oninput="updateInventoryPreview()"
                             >
                             <button onclick="saveInventoryByPosition()" class="h-14 px-6 bg-status-green hover:bg-status-green/80 text-black font-bold rounded-xl transition-colors flex items-center gap-2 shadow-lg shadow-status-green/20">
                                 <span class="material-symbols-outlined">check</span>
@@ -303,6 +304,12 @@
         let isFirstLoad = true;
         let inventoryData = {};
         let currentInventoryContext = {};
+        
+        // 🚀 NOVO: Cache de posições para evitar requisições repetidas
+        let positionsCache = {};
+        
+        // 🚀 NOVO: Debounce para search
+        let searchTimeout = null;
 
         // ELEMENTOS
         const tabsContainer = document.getElementById('tabs-container');
@@ -318,6 +325,14 @@
         const filterIndicator = document.getElementById('filter-indicator');
         const exportBtn = document.getElementById('export-btn');
         const searchInput = document.getElementById('search-input');
+
+        // 🚀 NOVO: Event listener otimizado para search com debounce
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                filterItems(e.target.value);
+            }, 300); // 300ms debounce
+        });
 
         // FUNÇÕES DE MODAL
         function openModal(modalId) {
@@ -350,7 +365,7 @@
             }, 300);
         }
 
-        // MODAL ESTOQUE
+        // MODAL ESTOQUE - 🚀 OTIMIZADO
         async function openStockModal(sku) {
             console.log('Abrindo estoque:', sku);
             
@@ -360,16 +375,27 @@
                 return;
             }
 
+            // 🚀 OTIMIZAÇÃO: Configurar UI imediatamente antes de qualquer operação async
             document.getElementById('stock-modal-title').innerText = item.nome || 'Verificar Estoque';
             document.getElementById('stock-modal-subtitle').innerText = `SKU: ${sku}`;
+            document.getElementById('stock-total-qtd').innerText = '...';
             
+            // Mostrar loading state imediatamente
             document.getElementById('stock-modal-body').innerHTML = `
                 <div class="flex flex-col items-center justify-center h-48 gap-3 text-slate-500">
                     <span class="size-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></span>
                     <span class="text-xs uppercase tracking-widest">Buscando posições...</span>
                 </div>`;
             
+            // 🚀 OTIMIZAÇÃO: Abrir modal IMEDIATAMENTE (antes do fetch)
             openModal('stock-modal');
+
+            // 🚀 OTIMIZAÇÃO: Verificar cache primeiro
+            if (positionsCache[sku]) {
+                console.log('Usando cache para:', sku);
+                renderStockPositions(sku, item, positionsCache[sku]);
+                return;
+            }
 
             try {
                 const url = `${SHEET_API_URL}?type=details&sku=${encodeURIComponent(sku)}`;
@@ -378,6 +404,9 @@
                 
                 if (data.error) throw new Error(data.message);
                 
+                // 🚀 OTIMIZAÇÃO: Salvar no cache
+                positionsCache[sku] = data;
+                
                 renderStockPositions(sku, item, data);
             } catch (error) {
                 console.error('Erro:', error);
@@ -385,6 +414,9 @@
                     <div class="flex flex-col items-center justify-center h-48 text-status-red gap-2">
                         <span class="material-symbols-outlined text-3xl">error</span>
                         <p class="text-sm">Erro ao carregar posições</p>
+                        <button onclick="openStockModal('${sku}')" class="mt-2 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-xs transition-colors">
+                            Tentar novamente
+                        </button>
                     </div>`;
             }
         }
@@ -413,7 +445,7 @@
                 
                 html += `
                     <div onclick="openInventoryModal('${sku}', '${pos.loc}', ${qtd})" 
-                         class="p-4 hover:bg-white/5 cursor-pointer transition-colors group">
+                         class="p-4 hover:bg-white/5 cursor-pointer transition-colors group will-change-transform">
                         <div class="flex justify-between items-center">
                             <div class="flex items-center gap-3">
                                 <div class="size-10 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold">
@@ -464,6 +496,10 @@
             const existing = (inventoryData[sku] && inventoryData[sku][position]) || 0;
             document.getElementById('inv-input-count').value = existing || '';
             
+            // 🚀 OTIMIZAÇÃO: Event listener para input em tempo real
+            const inputEl = document.getElementById('inv-input-count');
+            inputEl.oninput = updateInventoryPreview;
+            
             if (existing) {
                 updateInventoryPreview();
             } else {
@@ -510,11 +546,20 @@
             const btn = event.target.closest('button');
             const original = btn.innerHTML;
             btn.innerHTML = '<span class="material-symbols-outlined">check</span> Salvo!';
+            btn.disabled = true;
             
             setTimeout(() => {
                 btn.innerHTML = original;
+                btn.disabled = false;
                 closeInventoryModal();
-                setTimeout(() => openStockModal(sku), 350);
+                // 🚀 OTIMIZAÇÃO: Reabrir modal sem nova requisição (usa cache)
+                setTimeout(() => {
+                    const item = cachedData.find(i => i.sku === sku);
+                    if (item && positionsCache[sku]) {
+                        renderStockPositions(sku, item, positionsCache[sku]);
+                        openModal('stock-modal');
+                    }
+                }, 350);
             }, 800);
         }
 
@@ -531,6 +576,13 @@
             e.stopPropagation();
             filterMenu.classList.toggle('hidden');
         }
+
+        // Fechar menu ao clicar fora
+        document.addEventListener('click', (e) => {
+            if (!filterMenu.contains(e.target) && !e.target.closest('button[onclick="toggleFilterMenu(event)"]')) {
+                filterMenu.classList.add('hidden');
+            }
+        });
 
         function applySort(type) {
             currentSort = type;
@@ -593,6 +645,8 @@
                     container.innerHTML = '';
                     searchInput.value = '';
                     filteredData = [];
+                    // 🚀 OTIMIZAÇÃO: Limpar cache ao trocar de aba para forçar refresh
+                    positionsCache = {};
                     renderTabs();
                     fetchData(sector, true);
                 };
@@ -647,6 +701,10 @@
             }
 
             noResults.classList.add('hidden');
+            
+            // 🚀 OTIMIZAÇÃO: Usar DocumentFragment para reduzir reflows
+            const fragment = document.createDocumentFragment();
+            
             const grouped = {};
             FAMILIES_CONFIG.forEach(f => grouped[f.code] = []);
             grouped['OUTROS'] = [];
@@ -665,34 +723,47 @@
             });
 
             FAMILIES_CONFIG.forEach(f => {
-                if (grouped[f.code].length > 0) renderSection(f.code, f.title, sortItems(grouped[f.code]));
+                if (grouped[f.code].length > 0) {
+                    const section = renderSection(f.code, f.title, sortItems(grouped[f.code]));
+                    fragment.appendChild(section);
+                }
             });
             
-            if (grouped['OUTROS'].length > 0) renderSection('OUTROS', 'Outros', sortItems(grouped['OUTROS']));
+            if (grouped['OUTROS'].length > 0) {
+                const section = renderSection('OUTROS', 'Outros', sortItems(grouped['OUTROS']));
+                fragment.appendChild(section);
+            }
+            
+            container.innerHTML = '';
+            container.appendChild(fragment);
         }
 
         function renderSection(id, title, items) {
             let sec = document.getElementById(`sec-${id}`);
-            let grid;
             
             if (!sec) {
                 sec = document.createElement('section');
                 sec.id = `sec-${id}`;
-                sec.innerHTML = `
-                    <div class="flex items-center justify-between mb-4 pb-2 border-b border-white/5">
-                        <h4 class="text-xs font-bold uppercase tracking-widest text-slate-400">${title}</h4>
-                        <span class="text-[10px] font-mono text-slate-500">${items.length} itens</span>
-                    </div>`;
-                grid = document.createElement('div');
-                grid.id = `grid-${id}`;
-                grid.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3";
-                sec.appendChild(grid);
-                container.appendChild(sec);
-            } else {
-                grid = document.getElementById(`grid-${id}`);
             }
             
-            items.forEach(item => grid.appendChild(createCard(item)));
+            sec.innerHTML = `
+                <div class="flex items-center justify-between mb-4 pb-2 border-b border-white/5">
+                    <h4 class="text-xs font-bold uppercase tracking-widest text-slate-400">${title}</h4>
+                    <span class="text-[10px] font-mono text-slate-500">${items.length} itens</span>
+                </div>`;
+            
+            const grid = document.createElement('div');
+            grid.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3";
+            
+            // 🚀 OTIMIZAÇÃO: Criar cards em lote
+            const cardsFragment = document.createDocumentFragment();
+            items.forEach(item => {
+                cardsFragment.appendChild(createCard(item));
+            });
+            grid.appendChild(cardsFragment);
+            
+            sec.appendChild(grid);
+            return sec;
         }
 
         function createCard(item) {
@@ -709,7 +780,7 @@
             
             const el = document.createElement('div');
             el.id = `card-${item.sku}`;
-            el.className = `relative bg-[#16161e] border border-white/5 rounded-xl overflow-hidden card-hover ${vis.theme.glow}`;
+            el.className = `relative bg-[#16161e] border border-white/5 rounded-xl overflow-hidden card-hover ${vis.theme.glow} will-change-transform`;
             
             const invBadge = hasInv ? `
                 <div class="absolute top-3 left-3">
